@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="grass">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#55a441" />
+    <script>
+      // 首屏主题预置：在浏览器绘制前应用，避免刷新时先闪一下默认主题。
+      // 键名与默认值需与 src/theme.ts 保持一致。
+      (function () {
+        try {
+          var t = localStorage.getItem('chilema.theme');
+          if (t !== 'grass' && t !== 'coral') t = 'grass';
+          document.documentElement.setAttribute('data-theme', t);
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', t === 'coral' ? '#ff6b52' : '#55a441');
+        } catch (e) {
+          /* 隐私模式等无法读取时沿用 <html data-theme="grass"> */
+        }
+      })();
+    </script>
+    <meta
+      name="description"
+      content="吃了吗 —— 记下吃过的菜、配料与照片，随机推荐今天吃什么。数据保存在本机，不上传。"
+    />
+    <link rel="icon" type="image/png" href="./icon-192.png" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="吃了吗" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <title>吃了吗</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,128 @@
+// ---------------------------------------------------------------------------
+// 版本号：存在 android/version.properties
+//   versionCode —— 每次真正打包时自动 +1（见文件末尾的 bumpVersionCode 任务）
+//   versionName —— 只写"基础版本号"当前缀，例如 1.8；升主版本时改这里
+// 最终 APK 的版本名 = versionName + "." + versionCode，例如 1.8.20
+//   → 手机上「应用信息」里能直接看出是哪个 build，不用再靠猜
+// ---------------------------------------------------------------------------
+def versionFile = rootProject.file('version.properties')
+def versionProps = new Properties()
+if (versionFile.exists()) {
+    versionFile.withReader('UTF-8') { versionProps.load(it) }
+}
+def storedVersionName = versionProps.getProperty('versionName') ?: '1.0'
+def buildVersionCode = (versionProps.getProperty('versionCode') ?: '0').toInteger() + 1
+def buildVersionName = "${storedVersionName}.${buildVersionCode}"
+
+apply plugin: 'com.android.application'
+
+android {
+    namespace = "com.chilema.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.chilema.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode buildVersionCode
+        versionName buildVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// ---------------------------------------------------------------------------
+// 打包前清掉上一次的安装包（apk / aab）
+// 目的：versionCode 在打包时就已经 +1，万一这次打包失败，outputs 里会留着
+//       上一次的旧包，很容易被误当成"刚打好的新包"装到手机上。
+//       所以每次打包先清空：宁可没有包，也不要留一个来路不明的旧包。
+// 只在真正打包（assemble / bundle）时执行，IDE 同步、lintDebug、gradlew tasks
+// 都不会动已有的包。
+// ---------------------------------------------------------------------------
+def packagedOutputsDir = layout.buildDirectory.dir('outputs').get().asFile
+
+tasks.register('cleanOldPackages') {
+    group = 'versioning'
+    description = '清除上一次生成的 apk / aab'
+    doLast {
+        ['apk', 'bundle'].each { sub ->
+            def dir = new File(packagedOutputsDir, sub)
+            if (dir.exists()) {
+                dir.deleteDir()
+                logger.lifecycle("已清除历史安装包：${dir}")
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 版本号 +1 并写回 android/version.properties
+// 同样只在真正打包时执行：
+//   - gradlew assembleDebug / assembleRelease → versionCode +1
+//   - gradlew clean / IDE 同步 / gradlew tasks / lintDebug → 不动文件，不会跳号
+// 注意：写回发生在打包开始时，因此打包中途失败也已经 +1 了。
+// ---------------------------------------------------------------------------
+tasks.register('bumpVersionCode') {
+    group = 'versioning'
+    description = '把 versionCode +1 写回 android/version.properties'
+    doLast {
+        def header = '# 版本号（由 android/app/build.gradle 自动维护）\n' +
+                '# versionCode：每次打包自动 +1，不要手改。\n' +
+                '# versionName：基础版本号（前缀），升主版本时改这里，例如 1.8 → 1.9。\n' +
+                '#              实际 APK 的版本名 = versionName + "." + versionCode。\n'
+        versionFile.setText(header + "versionCode=${buildVersionCode}\nversionName=${storedVersionName}\n", 'UTF-8')
+        logger.lifecycle("版本号自增：versionCode=${buildVersionCode}, versionName=${buildVersionName}")
+    }
+}
+
+// 只在这几个"打包"命令上挂载上面两个任务
+tasks.matching {
+    it.name in ['assembleDebug', 'assembleRelease', 'bundleDebug', 'bundleRelease']
+}.configureEach {
+    dependsOn 'cleanOldPackages', 'bumpVersionCode'
+}
+
+// 保证清理 + 自增一定发生在真正写包（packageXxx）之前：
+// dependsOn 只保证"先于 assembleXxx"，兄弟任务之间没有顺序，必须显式约束，
+// 否则清理可能晚于打包，把刚生成的新包删掉。
+tasks.matching { it.name.startsWith('package') }.configureEach {
+    mustRunAfter 'cleanOldPackages', 'bumpVersionCode'
+}
